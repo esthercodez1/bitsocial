@@ -295,3 +295,73 @@
     (map-get? UserPrivacy user)
   )
 )
+
+;; PUBLIC INTERFACE FUNCTIONS
+
+;; Intelligent Batch Size Optimization
+(define-public (optimize-batch-size (user principal))
+  (let (
+      (batch-data (unwrap-panic (map-get? UserBatches user)))
+      (current-time stacks-block-height)
+      (time-since-last-batch (- current-time (get last-batch-timestamp batch-data)))
+      (current-batch-size (get batch-size batch-data))
+      (items-in-current-batch (get current-batch-items batch-data))
+    )
+    (if (> time-since-last-batch BATCH_EXPIRY_PERIOD)
+      ;; Batch expired, reset and optimize
+      (begin
+        (map-set UserBatches user
+          (merge batch-data {
+            batch-size: (max-uint MIN_BATCH_SIZE (/ current-batch-size u2)),
+            current-batch-items: u0,
+            last-batch-timestamp: current-time,
+          })
+        )
+        (ok true)
+      )
+      ;; Dynamic adjustment based on usage patterns
+      (begin
+        (map-set UserBatches user
+          (merge batch-data { batch-size: (min-uint MAX_BATCH_SIZE
+            (if (>= items-in-current-batch (/ current-batch-size u2))
+              (* current-batch-size u2)
+              current-batch-size
+            )) }
+          ))
+        (ok true)
+      )
+    )
+  )
+)
+
+;; Advanced Privacy Configuration Engine
+(define-public (update-advanced-privacy-settings
+    (friend-list-visible bool)
+    (status-visible bool)
+    (metadata-visible bool)
+    (last-seen-visible bool)
+    (profile-image-visible bool)
+    (encryption-enabled bool)
+  )
+  (let ((caller tx-sender))
+    (asserts! (check-active-user caller) ERR_DEACTIVATED)
+    (asserts! (check-rate-limit caller u2) ERR_RATE_LIMITED)
+    (map-set UserPrivacy caller {
+      friend-list-visible: friend-list-visible,
+      status-visible: status-visible,
+      metadata-visible: metadata-visible,
+      last-seen-visible: last-seen-visible,
+      profile-image-visible: profile-image-visible,
+      encryption-enabled: encryption-enabled,
+      last-updated: stacks-block-height,
+    })
+    (update-rate-limit caller u2)
+    (update-user-activity caller)
+    (print {
+      event: "privacy-configuration-updated",
+      user: caller,
+      timestamp: stacks-block-height,
+    })
+    (ok true)
+  )
+)
